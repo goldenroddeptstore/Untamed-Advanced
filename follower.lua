@@ -986,6 +986,7 @@ end
 -- ENTER_POKEBALL held movement (Task_OWEApproachForBattle recall).
 -- comeBack: pop out on the same cell once the script releases control.
 local backX, backY = nil, nil
+local appearPending = false
 function Follower.enterBall(comeBack)
   if not actor.active or actor.invisible or talkCo then return end
   if comeBack then backX, backY = actor.cellX, actor.cellY end
@@ -1076,6 +1077,7 @@ end
 local wasLocked = false
 local lastLead, lastLeadSp = false, nil
 function Follower.tick()
+  if appearPending then Follower.appearNow() end
   -- menus pause the field without locking controls, so also watch the lead mon
   local locked = E.controlsLocked()
   local lead = Follower.firstLiveMon()
@@ -1156,6 +1158,28 @@ function Follower.onMapEntered(ev)
   lastPX = -1
   copyMove = COPY_NONE
   Follower.update()
+  appearPending = true
+end
+
+-- Not expansion (D39): show the follower at once on the first free side, behind first.
+-- Waits for the warp fade to release controls; one try per map entry.
+local SIDES = { up = { "down", "left", "right", "up" }, down = { "up", "right", "left", "down" },
+  left = { "right", "up", "down", "left" }, right = { "left", "down", "up", "right" } }
+function Follower.appearNow()
+  if not E.C.OW_FOLLOWERS_APPEAR_NOW then appearPending = false return end
+  if E.controlsLocked() or not actor.active then return end
+  appearPending = false
+  if not actor.invisible or not E.followerVisible() then return end
+  local px, py = E.playerCur()
+  for _, d in ipairs(SIDES[Player.facing] or SIDES.down) do
+    local tx, ty = px + DX[d], py + DY[d]
+    if E.canMove(actor, tx, ty, d) then
+      moveToMapCoords(tx, ty)
+      actor.invisible = false
+      faceDirection(Player.facing)
+      return
+    end
+  end
 end
 
 function Follower.onBattleStarted(_) end

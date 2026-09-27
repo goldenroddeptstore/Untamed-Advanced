@@ -76,8 +76,11 @@ return function(mod)
     { "OW_MON_WANDER_WALK",          true,  "Marching" },
     { "WE_VANILLA_RANDOM",           false, "Random battles" },
     { "WE_OWE_RESTRICT_METATILE",    true,  "Limit movement" },
+    -- not expansion (D40): FR's own Pokémon objects use the mod's sprites
+    { "OW_STATIC_RESKIN",            true,  "Mod sprites" },
     -- locked
     { "OW_FOLLOWERS_POKEBALLS",      true },
+    { "OW_FOLLOWERS_APPEAR_NOW",     true }, -- not expansion (D39)
     { "OW_FOLLOWERS_WEATHER_FORMS",  true },
     { "OW_FOLLOWERS_COPY_WILD_PKMN", false },
     { "OW_FOLLOWERS_SCRIPT_MOVEMENT", true },
@@ -320,6 +323,18 @@ return function(mod)
     return list
   end
 
+  -- pokefirered OBJ_EVENT_GFX_* Pokémon objects -> species (Lapras doll, Deoxys A/D stay vanilla)
+  local RESKIN = {
+    [109] = 143, [110] = 21, [111] = 104, [112] = 62, [113] = 35, [114] = 18, [115] = 39,
+    [116] = 16, [117] = 113, [118] = 138, [119] = 115, [120] = 25, [121] = 54, [122] = 29,
+    [123] = 32, [124] = 33, [125] = 52, [126] = 86, [127] = 100, [128] = 79, [129] = 80,
+    [130] = 66, [131] = 40, [132] = 84, [133] = 22, [134] = 67, [135] = 131, [136] = 145,
+    [137] = 146, [138] = 144, [139] = 150, [140] = 151, [141] = 244, [142] = 245, [143] = 243,
+    [144] = 249, [145] = 250, [146] = 251, [147] = 140, [150] = 386,
+  }
+  local reskinSheet, reskinRow = {}, {} -- species -> sheet / palette row (false = no sheet)
+  local staticT = 0
+
   local rawOwDraw = OwSprites.draw
   local questGid = {} -- recorded id -> parsed pose (false = not ours)
   OwSprites.draw = function(gid, px, py, camX, camY, facing, walkPhase, stepFlip, opts)
@@ -330,6 +345,29 @@ return function(mod)
       local r = gid.draw(gid, px - camX, py - camY, walkPhase, stepFlip)
       G.unbind()
       return r ~= false
+    end
+    local sp = C.OW_STATIC_RESKIN and (RESKIN[gid] or (type(gid) == "string" and RESKIN[tonumber(gid)]))
+    if sp then
+      local sheet = reskinSheet[sp]
+      if sheet == nil then
+        local s, row = E.Gfx.sheetFor(sp, false, false)
+        if s == E.Data.ATLAS.SUBSTITUTE then s = nil end
+        sheet, reskinRow[sp] = s or false, row
+        reskinSheet[sp] = sheet
+      end
+      if sheet then
+        -- idle = the follower's walk-in-place at half speed (bobbing) or a still face frame
+        local dir = facing or "down"
+        local Fo = E.Follower
+        local T = Fo.ANIMS[E.Data.ATLAS.asym[sp] == 1]
+        local f, flip
+        if C.OW_FOLLOWERS_BOBBING or (walkPhase and walkPhase ~= 0) then
+          f, flip = Fo.animFrame(T.go[dir] or T.go.down, math.floor(staticT / 2))
+        else
+          f, flip = Fo.animFrame(T.face[dir] or T.face.down, 0)
+        end
+        return E.Gfx.draw(sheet, f, flip, reskinRow[sp], px - camX, py - camY)
+      end
     end
     if type(gid) == "string" then
       local r = questGid[gid]
@@ -1193,6 +1231,7 @@ return function(mod)
   local rawFieldUpdate = E.Field.update
   E.Field.update = function(dt)
     local r = rawFieldUpdate(dt)
+    staticT = staticT + 1
     if E.Field.running then
       if C.OW_FOLLOWERS_ENABLED then Follower.tick() end
       if C.WE_OW_ENCOUNTERS then Owe.tick() end
