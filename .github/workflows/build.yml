@@ -1,0 +1,54 @@
+name: Build and release mod package
+
+on:
+  push:
+    branches: [master]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.manifest.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read manifest version
+        id: manifest
+        run: |
+          version=$(python3 -c "import json; print(json.load(open('manifest.json'))['version'])")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Check tag matches manifest
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: test "${GITHUB_REF_NAME#v}" = "${{ steps.manifest.outputs.version }}"
+
+      - name: Package mod
+        run: |
+          mkdir -p dist/untamed_advanced
+          cp manifest.json *.lua atlas.png palettes.png dist/untamed_advanced/
+          cd dist && zip -X -r "untamed_advanced-${{ steps.manifest.outputs.version }}.zip" untamed_advanced
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: untamed_advanced-${{ steps.manifest.outputs.version }}
+          path: dist/untamed_advanced-${{ steps.manifest.outputs.version }}.zip
+
+  release:
+    needs: package
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: untamed_advanced-${{ needs.package.outputs.version }}
+          path: dist
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/untamed_advanced-${{ needs.package.outputs.version }}.zip
+          generate_release_notes: true
