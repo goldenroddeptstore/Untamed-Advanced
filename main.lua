@@ -1008,7 +1008,9 @@ return function(mod)
     uniform float mosaic;   // REG_MOSAIC block size in px, 1 = off
     uniform vec2 atlasSize;
     uniform float gray;     // Quest Log past scenes are monochrome
-    vec4 effect(vec4 color, Image tex, vec2 uv, vec2 sc) {
+    // highp uv: mediump (fp16) misses texels past x=2048
+    vec4 effect(vec4 color, Image tex, vec2 texcoord, vec2 sc) {
+      highp vec2 uv = VaryingTexCoord.st;
       if (mosaic > 1.0) uv = (floor(uv * atlasSize / mosaic) * mosaic + 0.5) / atlasSize;
       float idx = floor(Texel(tex, uv).r * 255.0 / 16.0 + 0.5);
       if (idx < 0.5) discard;
