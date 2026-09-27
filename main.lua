@@ -260,19 +260,39 @@ return function(mod)
 
   local FX = E.FieldEffects
   -- On the GBA objects south of the player draw over its grass cover; redraw them after it.
+  -- redraw in field_view's sort order (sortY, localId)
+  local redrawList, redrawKey = {}, {}
+  local function sortKey(a)
+    local y = a.py
+    if a.moving and a.targetY > a.cellY and a.targetY * 16 > y then y = a.targetY * 16 end
+    return y
+  end
   local function redrawOverPlayerGrass(playerPy)
     local fx = FX._fx
     if not fx or not playerPy then return end
     local gx, gy = fx.cx * 16, fx.cy * 16
-    E.redrawing = true
-    E.Gfx.bind()
+    local n, hit = 0, false
     for i = 1, POOL do
       local a = actors[i]
-      if a.active and a.visible and a.draw and a.drawnAt == drawSerial
-          and a.py > playerPy and a.py < gy + 32
-          and a.px > gx - 16 and a.px < gx + 16 then
-        a.draw(a, a.lastSx, a.lastSy)
+      if a.active and a.visible and a.draw and a.drawnAt == drawSerial and a.py > playerPy then
+        if a.py < gy + 32 and a.px > gx - 16 and a.px < gx + 16 then hit = true end
+        local k = sortKey(a)
+        local j = n
+        while j > 0 and (redrawKey[j] > k or (redrawKey[j] == k
+            and redrawList[j].localId > a.localId)) do
+          redrawList[j + 1], redrawKey[j + 1] = redrawList[j], redrawKey[j]
+          j = j - 1
+        end
+        redrawList[j + 1], redrawKey[j + 1] = a, k
+        n = n + 1
       end
+    end
+    if not hit then return end
+    E.redrawing = true
+    E.Gfx.bind()
+    for i = 1, n do
+      local a = redrawList[i]
+      a.draw(a, a.lastSx, a.lastSy)
     end
     E.Gfx.unbind()
     E.redrawing = false
