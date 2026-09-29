@@ -53,13 +53,132 @@ return function(mod)
       -- ChooseAmbientCrySpecies: Emerald's Route 130 (water cries unless
       -- Mirage Island) -> function() return waterOnly end; none in Kanto
       ambientWaterOnly = nil,
+      -- pokefirered OBJ_EVENT_GFX_* Pokémon objects -> species (Lapras doll, Deoxys A/D stay vanilla)
+      reskin = {
+      [109] = 143, [110] = 21, [111] = 104, [112] = 62, [113] = 35, [114] = 18, [115] = 39,
+      [116] = 16, [117] = 113, [118] = 138, [119] = 115, [120] = 25, [121] = 54, [122] = 29,
+      [123] = 32, [124] = 33, [125] = 52, [126] = 86, [127] = 100, [128] = 79, [129] = 80,
+      [130] = 66, [131] = 40, [132] = 84, [133] = 22, [134] = 67, [135] = 131, [136] = 145,
+      [137] = 146, [138] = 144, [139] = 150, [140] = 151, [141] = 244, [142] = 245, [143] = 243,
+      [144] = 249, [145] = 250, [146] = 251, [147] = 140, [150] = 386,
+      },
     },
   }
   VERSIONS.leafgreen = VERSIONS.firered
-  -- Add ruby/sapphire/emerald here (and to manifest.json "games") when game3 ships them.
+
+  -- Emerald: ids come from game3's own pokeemerald constants.  Metatile
+  -- behaviors use game3's canonical ids (src.core.game3.mb: FR ids, RSE-only
+  -- ones at 0x100 + raw), which is what Collision.behavior returns.
+  VERSIONS.emerald = function()
+    local K = require("src.core.game3.constants").of("emerald")
+    local MB = require("src.core.game3.mb")
+    local MapIds = require("src.core.game3.map_ids")
+    local Runtime = require("src.core.game3.runtime")
+    local Rng = require("src.core.game3.rng")
+    local function id(kind, name) local ok, v = pcall(K.id, K, kind, name); return ok and v or nil end
+    local function map(name) return MapIds.forConst(name, "emerald") end
+    local function session() return Runtime.getSession() end
+    local function mapId() local s = session(); return s and s.map end
+    local function rules()
+      local ok, r = pcall(function() return require("src.core.game3.encounters").rules() end)
+      return ok and r or nil
+    end
+    local mb = {}
+    for _, n in ipairs({ "TALL_GRASS", "LONG_GRASS", "POND_WATER", "WATERFALL",
+      "OCEAN_WATER", "PUDDLE", "SHALLOW_WATER", "SAND", "DEEP_SAND", "FOOTPRINTS", "ICE" }) do
+      mb[n] = MB.id(n)
+    end
+    mb.ASH_GRASS = MB.id("ASHGRASS") -- pokeemerald spells it MB_ASHGRASS
+    local maps = {}
+    for _, n in ipairs({ "MAP_EVER_GRANDE_CITY", "MAP_ROUTE112", "MAP_ROUTE117_POKEMON_DAY_CARE",
+      "MAP_MAUVILLE_CITY_BIKE_SHOP", "MAP_NEW_MAUVILLE_INSIDE", "MAP_SLATEPORT_CITY_STERNS_SHIPYARD_1F",
+      "MAP_SLATEPORT_CITY_STERNS_SHIPYARD_2F", "MAP_LILYCOVE_CITY_DEPARTMENT_STORE_ELEVATOR",
+      "MAP_SHOAL_CAVE_LOW_TIDE_ICE_ROOM", "MAP_ROUTE117" }) do
+      maps[n] = map(n)
+    end
+    local songs = {}
+    for _, n in ipairs({ "MUS_GYM", "MUS_POKE_MART", "MUS_VICTORY_ROAD", "MUS_SAILING", "MUS_MT_PYRE" }) do
+      songs[n] = id("songs", n)
+    end
+    local ROUTE119, ROUTE130, SOOTOPOLIS = map("MAP_ROUTE119"), map("MAP_ROUTE130"), map("MAP_SOOTOPOLIS_CITY")
+    local FR = VERSIONS.firered
+    return {
+      -- CheckFeebasAtCoords (game3's Route 119 port); mon() = the gWildFeebas entry
+      feebas = {
+        at = function(x, y)
+          local r, m = rules(), mapId()
+          return m ~= nil and m == ROUTE119 and r ~= nil and r.checkFeebas ~= nil and r.checkFeebas(m, { x = x, y = y }) == true
+        end,
+        mon = function()
+          local r = rules()
+          if not (r and r.wildExtra) then return nil end
+          local ok, extra = pcall(r.wildExtra)
+          return ok and extra and extra.feebas and extra.feebas.mon or nil
+        end,
+      },
+      -- DoMassOutbreakEncounterTest / SetUpMassOutbreakEncounter (session.outbreak, rse/tv.lua)
+      outbreaks = {
+        test = function()
+          local s = session()
+          local o = s and s.outbreak
+          if type(o) ~= "table" or (tonumber(o.species) or 0) == 0 or o.map ~= s.map then return false end
+          return Rng.Random() % 100 < (tonumber(o.probability) or 0)
+        end,
+        mon = function()
+          local o = session().outbreak
+          local moves = type(o.moves) == "table" and { o.moves[1], o.moves[2], o.moves[3], o.moves[4] } or nil
+          return tonumber(o.species), tonumber(o.level) or 1, moves
+        end,
+      },
+      roamers = true,          -- Latias / Latios
+      roamerCount = 1,
+      townMapTypes = FR.townMapTypes,
+      repelVar = id("vars", "VAR_REPEL_STEP_COUNT"),
+      lureVar = nil,
+      -- AreLegendariesInSootopolisPreventingEncounters
+      sootopolis = function()
+        local f, s = id("flags", "FLAG_LEGENDARIES_IN_SOOTOPOLIS"), session()
+        if not (f and s and s.map == SOOTOPOLIS) then return false end
+        return require("src.core.game3.scripting.flags").getFlag(s, nil, f) == true
+      end,
+      mapTypeIndoor = 8,
+      battleFrontier = nil,    -- Pike / Pyramid keep game3's own encounters
+      mb = mb,
+      mapTypeUnderwater = 5,   -- MAP_TYPE_UNDERWATER
+      mapTypeUnderground = 4,
+      flags = FR.flags,
+      vars = FR.vars,
+      songs = songs,
+      maps = maps,
+      timeOfDay = nil,         -- vanilla Emerald has no day/night
+      abilities = FR.abilities, -- same Gen 3 ids
+      -- ChooseAmbientCrySpecies: Route 130 without Mirage Island -> water cries
+      ambientWaterOnly = function()
+        if mapId() ~= ROUTE130 then return false end
+        local ok, F = pcall(require, "src.core.game3.scripting.natives_field_rse")
+        return not (ok and F.isMirageIslandPresent and F.isMirageIslandPresent(session()))
+      end,
+      -- pokeemerald OBJ_EVENT_GFX_* Pokémon objects -> species (dolls, the Kyogre/
+      -- Groudon/Rayquaza cutscene sprites, Deoxys, Kecleon's shadow stay vanilla)
+      reskin = {
+        [98] = 263, [208] = 263, [203] = 300, [204] = 352, [209] = 25, [210] = 184,
+        [211] = 278, [214] = 298, [220] = 261, [225] = 281, [226] = 356, [228] = 185,
+        [229] = 151, [187] = 380, [188] = 381, [200] = 377, [201] = 378, [202] = 379,
+        [237] = 249, [238] = 250,
+      },
+    }
+  end
 
   local version = require("src.core.GameVersion").get()
   local V = VERSIONS[version]
+  if type(V) == "function" then -- built after game3 loads its constants
+    local ok, row = pcall(V)
+    if not ok then
+      mod.log:error("%s VERSIONS row failed (%s); mod disabled", version, tostring(row))
+      return
+    end
+    V = row
+  end
   if not V then
     mod.log:error("no VERSIONS row for %q; mod disabled", tostring(version))
     return
@@ -343,15 +462,7 @@ return function(mod)
     return list
   end
 
-  -- pokefirered OBJ_EVENT_GFX_* Pokémon objects -> species (Lapras doll, Deoxys A/D stay vanilla)
-  local RESKIN = {
-    [109] = 143, [110] = 21, [111] = 104, [112] = 62, [113] = 35, [114] = 18, [115] = 39,
-    [116] = 16, [117] = 113, [118] = 138, [119] = 115, [120] = 25, [121] = 54, [122] = 29,
-    [123] = 32, [124] = 33, [125] = 52, [126] = 86, [127] = 100, [128] = 79, [129] = 80,
-    [130] = 66, [131] = 40, [132] = 84, [133] = 22, [134] = 67, [135] = 131, [136] = 145,
-    [137] = 146, [138] = 144, [139] = 150, [140] = 151, [141] = 244, [142] = 245, [143] = 243,
-    [144] = 249, [145] = 250, [146] = 251, [147] = 140, [150] = 386,
-  }
+  local RESKIN = V.reskin or {} -- OBJ_EVENT_GFX_* Pokémon objects -> species
   local reskinSheet, reskinRow = {}, {} -- species -> sheet / palette row (false = no sheet)
   local staticT = 0
 

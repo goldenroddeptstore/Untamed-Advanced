@@ -1,14 +1,14 @@
 {
   "id": "untamed_advanced",
   "name": "Untamed Advanced",
-  "version": "1.0.0-beta.4",
+  "version": "1.0.0-beta.5",
   "api": 2,
   "entry": "main.lua",
   "profile": "overhaul",
   "category": "GAMEPLAY",
   "permissions": ["engine_internals"],
   "affects_link": true,
-  "games": ["firered", "leafgreen"],
+  "games": ["firered", "leafgreen", "emerald"],
   "github": "goldenroddeptstore/Untamed-Advanced",
   "description": "1:1 port of pokeemerald-expansion's Follower Pokemon and Overworld Wild Encounters."
 }

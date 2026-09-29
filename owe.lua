@@ -550,11 +550,12 @@ local function setSpeciesInfoForOWE(info, x, y)
     end
     if sp then
     elseif C.WE_OWE_FEEBAS_SPOTS and kind == "water" and V.feebas and V.feebas.at(x, y) then
-      sp, level = V.feebas.mon()
+      local e = V.feebas.mon()
+      sp, level = e and tonumber(e.species), e and chooseWildMonLevel(e)
       info.category = CAT_FEEBAS
       if C.WE_OWE_PREVENT_FEEBAS_DESPAWN then info.noDespawn = true end
     elseif V.outbreaks and V.outbreaks.test() and kind == "land" then
-      sp, level = V.outbreaks.mon()
+      sp, level, info.moves = V.outbreaks.mon()
       info.category = CAT_OUTBREAK
     else
       chainE = forceChainSpeciesSpawn(slots) -- Rogue_CreateWildMon (PARITY R2)
@@ -648,7 +649,7 @@ local function spawnOWE(a, x, y)
   a.asym = E.Data.ATLAS.asym[info.species] == 1
   a.species, a.engineSpecies, a.level = info.species, info.engineSpecies, info.level
   a.shiny, a.female, a.category, a.noDespawn = info.shiny, info.female, info.category, info.noDespawn
-  a.personality = info.personality
+  a.personality, a.moves = info.personality, info.moves
   a.oweType, a.age, a.offScreen = "generated", 0, false
   a.cellX, a.cellY, a.targetX, a.targetY = x, y, x, y
   a.initX, a.initY = x, y
@@ -703,7 +704,7 @@ function Owe.tick()
     return
   end
 
-  info.category, info.noDespawn = CAT_UNDEFINED, false
+  info.category, info.noDespawn, info.moves = CAT_UNDEFINED, false, nil
   info.species, info.engineSpecies = nil, nil
   local ok = setSpeciesInfoForOWE(info, x, y)
   if not ok
@@ -1420,7 +1421,8 @@ local function startWildBattleWithOWE(a)
     if sp and foe then return E.startWildBattle(foe, true, done) end
   end
   -- Spawn personality already carries gender and shininess (PARITY D31, D32).
-  local foe = { species = a.engineSpecies, level = a.level, personality = a.personality }
+  -- StartWildBattleWithOWE_CheckMassOutbreak: outbreak mons keep their TV moves
+  local foe = { species = a.engineSpecies, level = a.level, personality = a.personality, moves = a.moves }
   return E.startWildBattle(foe, false, done)
 end
 
