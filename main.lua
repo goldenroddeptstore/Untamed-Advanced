@@ -1293,17 +1293,20 @@ return function(mod)
       end
     end
   end
-  --- front=false: base pad (under the sprite); true: feet cover (over it).
+  --- front=false: base pad, only flagged here and drawn by drawGrassBase under
+  --- every object (pret oam priority below the avatar); true: feet cover (over it).
   function E.drawGrass(a, sx, sy, front)
-    if not a.grStep or (E.redrawing and not front) then return end
+    if not front then
+      if not E.redrawing then a.grBase = drawSerial end
+      return
+    end
+    if not a.grStep then return end
     local sh = grassSheet()
     if not sh then return end
     local f = RUSTLE[a.grStep + 1]
     local gx, gy = sx + (a.grX * 16 - a.px), sy + (a.grY * 16 - a.py)
     local q
-    if not front then
-      q = sh.quads[f]
-    else
+    do
       local feet = a.py + 16
       if feet < a.grY * 16 + FEET_H or feet > a.grY * 16 + 18 then return end
       q = sh.quadsFront and sh.quadsFront[f]
@@ -1316,6 +1319,31 @@ return function(mod)
     lg.setColor(1, 1, 1, 1)
     lg.draw(sh.image, q, gx, gy)
     if bound then lg.setShader(Gfx.shader) end
+  end
+
+  -- base pads of actors drawn last frame, with the map, before any object
+  local function drawGrassBase(camX, camY)
+    local sh
+    for i = 1, POOL do
+      local a = actors[i]
+      if a.active and a.grStep and a.grBase == drawSerial - 1 then
+        sh = sh or grassSheet()
+        local q = sh and sh.quads[RUSTLE[a.grStep + 1]]
+        if q then
+          love.graphics.setColor(1, 1, 1, 1)
+          love.graphics.draw(sh.image, q, a.grX * 16 - camX, a.grY * 16 - camY)
+        end
+      end
+    end
+  end
+  local FXb = E.FieldEffects
+  if FXb and FXb.drawBehind then
+    local rawBehind = FXb.drawBehind
+    FXb.drawBehind = function(camX, camY, ...)
+      local r = rawBehind(camX, camY, ...)
+      if inFieldDraw then drawGrassBase(camX or 0, camY or 0) end
+      return r
+    end
   end
 
   local SHADOWS = nil
