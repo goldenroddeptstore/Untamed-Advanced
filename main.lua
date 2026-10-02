@@ -1122,7 +1122,8 @@ return function(mod)
     // highp uv: mediump (fp16) misses texels past x=2048
     vec4 effect(vec4 color, Image tex, vec2 texcoord, vec2 sc) {
       highp vec2 uv = VaryingTexCoord.st;
-      if (mosaic > 1.0) uv = (floor(uv * atlasSize / mosaic) * mosaic + 0.5) / atlasSize;
+      // sample texel centres: a coord on a texel edge rounds either way (crunchy sprites)
+      uv = (floor(uv * atlasSize / mosaic) * mosaic + 0.5) / atlasSize;
       float idx = floor(Texel(tex, uv).r * 255.0 / 16.0 + 0.5);
       if (idx < 0.5) discard;
       // row = lo + hi * 256 never formed: rows > 2048 are inexact in mediump
@@ -1176,14 +1177,15 @@ return function(mod)
     if Gfx.ready or Gfx.failed then return Gfx.ready end
     local ok, err = pcall(function()
       local A = E.Data.ATLAS
-      Gfx.atlas = loadImage("atlas.png", "r8")
+      Gfx.pages = {}
+      for i = 1, A.pages do Gfx.pages[i] = loadImage("atlas" .. i .. ".png", "r8") end
       Gfx.pal = packPalettes(A.palRows)
       Gfx.shader = love.graphics.newShader(PAL_SHADER)
       Gfx.shader:send("pal", Gfx.pal)
       Gfx.shader:send("palH", Gfx.pal:getHeight())
       Gfx.shader:send("mosaic", 1)
       Gfx.shader:send("gray", 0)
-      Gfx.shader:send("atlasSize", { Gfx.atlas:getDimensions() })
+      Gfx.shader:send("atlasSize", { A.w, A.h }) -- every page is w x h
       Gfx.mosaic = 1
       Gfx.quads = {}
     end)
@@ -1222,9 +1224,10 @@ return function(mod)
     local qs = Gfx.quads[sheet]
     if not qs then qs = {}; Gfx.quads[sheet] = qs end
     local q = qs[frame]
+    local A = E.Data.ATLAS
+    local y = SHEETS[b + 2]
     if not q then
-      local aw, ah = Gfx.atlas:getDimensions()
-      q = love.graphics.newQuad(SHEETS[b + 1] + frame * fw, SHEETS[b + 2], fw, fh, aw, ah)
+      q = love.graphics.newQuad(SHEETS[b + 1] + frame * fw, y % A.h, fw, fh, A.w, A.h)
       qs[frame] = q
     end
     local lg = love.graphics
@@ -1236,7 +1239,7 @@ return function(mod)
     lg.setColor((palRow % 256) / 255, math.floor(palRow / 256) / 255, white or 0, alpha or 1)
     local k = xscale or 1
     if flip then k = -k end
-    lg.draw(Gfx.atlas, q, sx + 8, sy + 16 - fh, 0, k, 1, fw / 2, 0)
+    lg.draw(Gfx.pages[math.floor(y / A.h) + 1], q, math.floor(sx) + 8, math.floor(sy) + 16 - fh, 0, k, 1, fw / 2, 0)
     if not bound then lg.setShader(prev); lg.setColor(1, 1, 1, 1) end
     return true
   end

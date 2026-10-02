@@ -28,7 +28,7 @@ jobs:
       - name: Package mod
         run: |
           mkdir -p dist/untamed_advanced
-          cp manifest.json *.lua atlas.png palettes.png dist/untamed_advanced/
+          cp manifest.json *.lua atlas*.png palettes.png dist/untamed_advanced/
           cd dist && zip -X -r "untamed_advanced-${{ steps.manifest.outputs.version }}.zip" untamed_advanced
 
       - uses: actions/upload-artifact@v4
