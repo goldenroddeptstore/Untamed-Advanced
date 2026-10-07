@@ -662,7 +662,7 @@ local function spawnOWE(a, x, y)
   a.y2, a.icon, a.anim, a.animT = 0, -1, nil, 0
   a.saved = false -- OWE_SAVED_MOVEMENT_STATE_FLAG
   setMovementType(a)
-  a.draw, a.pose = draw, pose
+  a.drawSprite, a.pose = draw, pose
   a.active = true
   -- OnOverworldWildEncounterSpawn (from SpawnSpecialObjectEvent)
   sortOWEAges()
@@ -1335,7 +1335,7 @@ function Owe.init(engine)
       cellX = 0, cellY = 0, px = 0, py = 0, raiseX = 0, raiseY = 0,
       elevation = 0, currentElevation = 0, facing = "down", localId = -200 - i,
       info = nil, sheet = 1, palRow = 0, frame = 0, timer = 0,
-      xOff = 0, yOff = 0, rise = 0, sY = 0, draw = drawFx }
+      xOff = 0, yOff = 0, rise = 0, sY = 0, drawSprite = drawFx }
     s.graphicsId = s
     fxPool[i] = s
   end

@@ -326,7 +326,9 @@ return function(mod)
       stepFlip = false, facing = "down", elevation = 3, currentElevation = 3,
       customFrame = nil, localId = -100 - i, def = nil,
       oweType = nil, -- "generated" | "manual" (OWE_GENERATED / OWE_MANUAL)
-      draw = nil, -- function(actor, sx, sy, walkPhase, stepFlip)
+      -- Keep the sprite callback separate from field_view's draw(renderActor, camX, camY).
+      -- graphicsId routes drawing through OwSprites.draw with the original actor.
+      drawSprite = nil, -- function(actor, sx, sy, walkPhase, stepFlip)
     }
     a.graphicsId = a
     actors[i] = a
@@ -393,7 +395,7 @@ return function(mod)
     local n, hit = 0, false
     for i = 1, POOL do
       local a = actors[i]
-      if a.active and a.visible and a.draw and a.drawnAt == drawSerial and a.py > playerPy then
+      if a.active and a.visible and a.drawSprite and a.drawnAt == drawSerial and a.py > playerPy then
         if a.py < gy + 32 and a.px > gx - 16 and a.px < gx + 16 then hit = true end
         local k = sortKey(a)
         local j = n
@@ -411,7 +413,7 @@ return function(mod)
     E.Gfx.bind()
     for i = 1, n do
       local a = redrawList[i]
-      a.draw(a, a.lastSx, a.lastSy)
+      a.drawSprite(a, a.lastSx, a.lastSy)
     end
     E.Gfx.unbind()
     E.redrawing = false
@@ -447,7 +449,7 @@ return function(mod)
       local n = #list
       for i = 1, POOL do
         local a = actors[i]
-        if a.active and a.visible and a.draw then
+        if a.active and a.visible and a.drawSprite then
           n = n + 1
           list[n] = a
         end
@@ -473,7 +475,7 @@ return function(mod)
       gid.lastSx, gid.lastSy, gid.drawnAt = px - camX, py - camY, drawSerial
       local G = E.Gfx
       G.bind()
-      local r = gid.draw(gid, px - camX, py - camY, walkPhase, stepFlip)
+      local r = gid.drawSprite(gid, px - camX, py - camY, walkPhase, stepFlip)
       G.unbind()
       return r ~= false
     end

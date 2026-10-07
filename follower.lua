@@ -1055,7 +1055,7 @@ function Follower.init(engine)
   E, C, A, D, V = engine, engine.C, engine.Data.ATLAS, engine.Data, engine.V
   Player, Collision = engine.Player, engine.Collision
   actor = E.FOLLOWER
-  actor.draw, actor.pose = draw, pose
+  actor.drawSprite, actor.pose = draw, pose
   actor.moveDir, actor.emote, actor.emoteT, actor.emoteY, actor.emoteVel = "down", -1, 0, 0, 0
   actor.mosaic, actor.tType, actor.tFrames = 1, nil, 0
   compileMoves()

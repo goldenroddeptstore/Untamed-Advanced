@@ -15,6 +15,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Test render callback integration
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y luajit
+          luajit tests/render_callbacks.lua
+
       - name: Read manifest version
         id: manifest
         run: |

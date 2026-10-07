@@ -13,6 +13,12 @@ Same logic, same timings, same messages. If you've played a romhack with these f
 
 Pretty much everything can be toggled in the mod's options.
 
+## Tests
+
+Run `luajit tests/render_callbacks.lua` from the repository root. These headless
+regression tests exercise the mod's rendering hooks against gen1recomp's render
+wrapper callback contract; they do not require a ROM or LÖVE graphics context.
+
 ## Credits
 
 See [CREDITS.md](CREDITS.md).
