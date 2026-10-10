@@ -19,7 +19,7 @@ return function(mod)
       repelVar = 0x4020,     -- VAR_REPEL_STEP_COUNT
       lureVar = nil,         -- VAR_LURE_STEP_COUNT: no lures
       roamerCount = 1,       -- ROAMER_COUNT
-      sootopolis = nil,      -- AreLegendariesInSootopolisPreventingEncounters
+      sootopolis = nil,      -- AreLegendariesInSootopolisPreventingEncounters (flag absent in R/S -> false)
       mapTypeIndoor = 8,     -- MAP_TYPE_INDOOR (include/constants/map_types.h)
       battleFrontier = nil,  -- WE_OWE_BATTLE_PIKE / PYRAMID
       -- follower message conditions (follower_helper.c).  Names absent here
@@ -66,17 +66,18 @@ return function(mod)
   }
   VERSIONS.leafgreen = VERSIONS.firered
 
-  -- Emerald: ids come from game3's own pokeemerald constants.  Metatile
+  -- Emerald / Ruby / Sapphire: ids come from game3's own pokeemerald /
+  -- pokeruby constants.  Metatile
   -- behaviors use game3's canonical ids (src.core.game3.mb: FR ids, RSE-only
   -- ones at 0x100 + raw), which is what Collision.behavior returns.
-  VERSIONS.emerald = function()
-    local K = require("src.core.game3.constants").of("emerald")
+  local function rse(game)
+    local K = require("src.core.game3.constants").of(game)
     local MB = require("src.core.game3.mb")
     local MapIds = require("src.core.game3.map_ids")
     local Runtime = require("src.core.game3.runtime")
     local Rng = require("src.core.game3.rng")
     local function id(kind, name) local ok, v = pcall(K.id, K, kind, name); return ok and v or nil end
-    local function map(name) return MapIds.forConst(name, "emerald") end
+    local function map(name) return MapIds.forConst(name, game) end
     local function session() return Runtime.getSession() end
     local function mapId() local s = session(); return s and s.map end
     local function rules()
@@ -135,7 +136,7 @@ return function(mod)
       townMapTypes = FR.townMapTypes,
       repelVar = id("vars", "VAR_REPEL_STEP_COUNT"),
       lureVar = nil,
-      -- AreLegendariesInSootopolisPreventingEncounters
+      -- AreLegendariesInSootopolisPreventingEncounters (flag absent in R/S -> false)
       sootopolis = function()
         local f, s = id("flags", "FLAG_LEGENDARIES_IN_SOOTOPOLIS"), session()
         if not (f and s and s.map == SOOTOPOLIS) then return false end
@@ -150,7 +151,7 @@ return function(mod)
       vars = FR.vars,
       songs = songs,
       maps = maps,
-      timeOfDay = nil,         -- vanilla Emerald has no day/night
+      timeOfDay = nil,         -- vanilla RSE has no day/night
       abilities = FR.abilities, -- same Gen 3 ids
       -- ChooseAmbientCrySpecies: Route 130 without Mirage Island -> water cries
       ambientWaterOnly = function()
@@ -158,16 +159,23 @@ return function(mod)
         local ok, F = pcall(require, "src.core.game3.scripting.natives_field_rse")
         return not (ok and F.isMirageIslandPresent and F.isMirageIslandPresent(session()))
       end,
-      -- pokeemerald OBJ_EVENT_GFX_* Pokémon objects -> species (dolls, the Kyogre/
-      -- Groudon/Rayquaza cutscene sprites, Deoxys, Kecleon's shadow stay vanilla)
-      reskin = {
+      -- OBJ_EVENT_GFX_* Pokémon objects -> species (dolls, the Kyogre/Groudon/
+      -- Rayquaza cutscene sprites, Deoxys, Kecleon's shadow stay vanilla)
+      reskin = game == "emerald" and {
         [98] = 263, [208] = 263, [203] = 300, [204] = 352, [209] = 25, [210] = 184,
         [211] = 278, [214] = 298, [220] = 261, [225] = 281, [226] = 356, [228] = 185,
         [229] = 151, [187] = 380, [188] = 381, [200] = 377, [201] = 378, [202] = 379,
         [237] = 249, [238] = 250,
+      } or { -- pokeruby
+        [98] = 261, [208] = 263, [203] = 300, [204] = 352, [209] = 25, [210] = 184,
+        [211] = 278, [214] = 298, [187] = 380, [188] = 381, [200] = 377, [201] = 378,
+        [202] = 379,
       },
     }
   end
+  VERSIONS.emerald = function() return rse("emerald") end
+  VERSIONS.ruby = function() return rse("ruby") end
+  VERSIONS.sapphire = function() return rse("sapphire") end
 
   local version = require("src.core.GameVersion").get()
   local V = VERSIONS[version]
