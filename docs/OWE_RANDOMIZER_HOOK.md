@@ -29,8 +29,12 @@ gender/shiny assessment, and eventual battle all use the **same final
 internal species ID**.
 
 Roamers, Feebas special spawns, outbreaks, and manually placed actors bypass
-this hook. Encounter-chain popups and counts follow the **actual visible/battled species** (for example, Feraligatr rather than the native Rattata slot it replaces). The original authored slot is stored separately, only to preserve the increased chance to spawn that source in later encounters. Followers are
-unaffected.
+this hook. Encounter-chain popups and counts follow the **actual visible/battled species** (for example, Feraligatr rather than the native Rattata slot it replaces). The original authored **native** slot is stored separately, including when
+Modern Spawns supplies a different species before this hook is called. It
+preserves the increased chance to spawn that source in later encounters.
+When a chain forces this slot, Untamed keeps the actual chained species
+without redrawing the Modern Spawns roster or rerolling Nuzlocke's species
+hook; the normal chain-shiny odds then apply. Followers are unaffected.
 
 The hook is optional. Untamed behaves as before when nobody subscribes.
 The corresponding [Nuzlocke v3.0.0-BETA](https://github.com/Deluxe0111/nuzlocke) hook connects this to **Random Wild** using the normal Nuzlocke Randomiser seed, Gen 3 species pool, and balance settings. Integration by **Deluxe0111**.
