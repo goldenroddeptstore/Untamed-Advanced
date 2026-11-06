@@ -488,7 +488,9 @@ local function tryGenerateWildMon(slots, kind)
   local e = slots[idx] or slots[#slots]
   local sp = entrySpecies(e)
   if not sp then return nil end
-  return sp, chooseWildMonLevel(e)
+  -- Preserve the native slot index; Modern Spawns changes the species in
+  -- each entry but retains the slot order, weights and level range.
+  return sp, chooseWildMonLevel(e), idx
 end
 
 -- Encounter chain (pokeemerald-rogue, not expansion: PARITY R1-R4).
@@ -585,7 +587,7 @@ local function setSpeciesInfoForOWE(info, x, y)
   local slots = E.wildArea(header, kind)
   if not slots then return false end
 
-  local sp, level, chainE
+  local sp, level, chainE, sourceSpecies
   if info.category == CAT_UNDEFINED then
     -- TryStartRoamerEncounter: IsRoamerAt && Random() % 4 == 0
     for i = 0, ROAMER_COUNT - 1 do
@@ -607,16 +609,20 @@ local function setSpeciesInfoForOWE(info, x, y)
     else
       chainE = forceChainSpeciesSpawn(slots) -- Rogue_CreateWildMon (PARITY R2)
       if chainE then
-        -- Force the authored slot, then remap it once through the hook.
-        -- Never feed the randomized display species back into the native
-        -- spawn table: it may not be one of that area's native slots.
-        sp, level = entrySpecies(chainE), chooseWildMonLevel(chainE)
+        -- The source identifies a native slot, NOT the species to display.
+        -- Reuse the actual chained species: Modern Spawns COMPLETE/RANDOM
+        -- may have drawn a different species for this slot, and Nuzlocke
+        -- may have randomised it again. Rerolling either breaks the chain.
+        sourceSpecies = entrySpecies(chainE)
+        sp, level = chainSpecies, chooseWildMonLevel(chainE)
       else
         -- Ordinary visual encounters need a fresh Modern Spawns draw,
         -- rather than reusing only the native Route 1 source species.
-        -- The native weights/level ranges are retained by the adapter.
+        -- The adapter retains native slot order, weights and level ranges.
         local drawn = E.modernWildArea and E.modernWildArea(kind, slots)
-        sp, level = tryGenerateWildMon(drawn or slots, kind)
+        local index
+        sp, level, index = tryGenerateWildMon(drawn or slots, kind)
+        sourceSpecies = index and entrySpecies(slots[index]) or nil
       end
     end
   else
@@ -624,14 +630,15 @@ local function setSpeciesInfoForOWE(info, x, y)
   end
   if not sp then return false end
 
-  -- Only ordinary generated wild encounters may be remapped. Roamers,
-  -- Feebas, outbreaks and scripted actors preserve their authored identity.
-  info.authoredSpecies = nil
-  if info.category == CAT_UNDEFINED and E.OWESpeciesHook then
+  -- Track the native source independently of the visible species, even
+  -- when only Modern Spawns changes it. The next chain-forced encounter
+  -- must find this source in the original wild table.
+  info.authoredSpecies = info.category == CAT_UNDEFINED and (sourceSpecies or sp) or nil
+  if info.category == CAT_UNDEFINED and E.OWESpeciesHook and not chainE then
+    -- Apply the optional randomiser to ordinary draws only. A forced
+    -- chain spawn already has its final, previously validated identity.
     local chosen = E.OWESpeciesHook.apply(E, sp, level, kind, x, y)
-    if chosen and chosen ~= sp then
-      info.authoredSpecies, sp = sp, chosen
-    end
+    if chosen and chosen ~= sp then sp = chosen end
   end
 
   -- CreateWildMon: random personality (GetSynchronizedGender = Cute Charm)
@@ -673,6 +680,9 @@ local function setSpeciesInfoForOWE(info, x, y)
   if info.category == CAT_UNDEFINED then info.category = CAT_WILD end
   return true
 end
+
+-- Internal regression hook for verifying species/source/shiny continuity.
+Owe._chain.spawnInfo = setSpeciesInfoForOWE
 
 local function abilityAllowsEncounter(level)
   local lead = E.leadMon()
