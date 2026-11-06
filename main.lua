@@ -8,6 +8,8 @@ return function(mod)
     return chunk()
   end
 
+  local ExpansionSpeciesMap = include("owe_expansion_species_map.lua")
+
   -- Per-version assumptions live only here; nil = unsupported (feature stays off).
   local VERSIONS = {
     firered = {
@@ -239,12 +241,30 @@ return function(mod)
   end
   schema[#schema + 1] = { key = "OW_AMBIENT_CRIES", label = "Ambient cries",
     type = "choice", default = 1, choices = AMBIENT }
+  -- Configurable overworld density. The original port's 4 actors / spawn
+  -- timings are retained as Classic presets; new defaults are more lively.
+  schema[#schema + 1] = { key = "OWE_POPULATION", label = "Wild population",
+    type = "choice", default = 8, choices = {
+      { "Classic (4)", 4 }, { "Balanced (6)", 6 },
+      { "Lively (8)", 8 }, { "Busy (10)", 10 },
+    } }
+  schema[#schema + 1] = { key = "OWE_SPAWN_PROXIMITY", label = "Wild proximity",
+    type = "choice", default = 1, choices = {
+      { "Classic", 0 }, { "Nearby", 1 }, { "Close", 2 },
+    } }
+  schema[#schema + 1] = { key = "OWE_SPAWN_FREQUENCY", label = "Wild frequency",
+    type = "choice", default = 1, choices = {
+      { "Classic", 0 }, { "Faster", 1 }, { "Fastest", 2 },
+    } }
   mod.options:define(schema)
 
   -- Flat option cache, refreshed on change, so hot paths skip mod.options:get.
   local C = {
     -- include/wild_encounter_ow.h, src/wild_encounter_ow.c:46-58
-    OWE_SPAWNS_MAX = 4,
+    -- Physical actor pool is fixed at startup; active limit can change live.
+    OWE_SPAWNS_MAX = 10,
+    OWE_ACTIVE_LIMIT = 8,
+    OWE_SPAWN_PROXIMITY = 1,
     OWE_APPROACH_DISTANCE = 2,
     OWE_APPROACH_JUMP_TIMER_MIN = 16,
     OWE_APPROACH_JUMP_TIMER_MAX = 64,
@@ -274,6 +294,24 @@ return function(mod)
       C[f[1]] = v and true or false
     end
     C.OW_AMBIENT_CRIES = tonumber(mod.options:get("OW_AMBIENT_CRIES")) or 1
+    local population = tonumber(mod.options:get("OWE_POPULATION"))
+    C.OWE_ACTIVE_LIMIT = (population == 4 or population == 6
+      or population == 8 or population == 10) and population or 8
+    local proximity = tonumber(mod.options:get("OWE_SPAWN_PROXIMITY"))
+    C.OWE_SPAWN_PROXIMITY = (proximity == 0 or proximity == 1 or proximity == 2)
+      and proximity or 1
+    C.OWE_SPAWN_DISTANCE_WATER = C.OWE_SPAWN_PROXIMITY == 0 and 3 or 2
+    local frequency = tonumber(mod.options:get("OWE_SPAWN_FREQUENCY"))
+    if frequency == 0 then
+      C.OWE_SPAWN_TIME_MINIMUM, C.OWE_SPAWN_TIME_PER_ACTIVE,
+        C.OWE_SPAWN_TIME_REPLACEMENT = 30, 30, 240
+    elseif frequency == 2 then
+      C.OWE_SPAWN_TIME_MINIMUM, C.OWE_SPAWN_TIME_PER_ACTIVE,
+        C.OWE_SPAWN_TIME_REPLACEMENT = 6, 4, 45
+    else
+      C.OWE_SPAWN_TIME_MINIMUM, C.OWE_SPAWN_TIME_PER_ACTIVE,
+        C.OWE_SPAWN_TIME_REPLACEMENT = 15, 10, 90
+    end
     -- features the running version cannot support stay off
     if not V.feebas then C.WE_OWE_FEEBAS_SPOTS = false end
   end
@@ -317,6 +355,7 @@ return function(mod)
     Roamer = "src.core.game3.roamer", FieldEffects = "src.core.game3.field_effects",
     Doors = "src.core.game3.doors", Warp = "src.core.game3.warp",
     Movement = "src.core.game3.scripting.movement", Heal = "src.core.game3.pokecenter_heal",
+    ModHooks = "src.mods.Runtime", -- optional shared hook bus for overworld species providers
     QuestRecorder = "src.core.game3.quest_log_recorder", QuestLogUI = "src.ui.game3.quest_log",
   }) do
     local ok, m = pcall(require, path)
@@ -808,6 +847,11 @@ return function(mod)
     return slots
   end
 
+  -- Visible wilds are spawned by Untamed, not the engine's encounter
+  -- hooks. Use Modern Spawns' per-pick API when present, preserving the
+  -- original land/water slot weights, levels, collision and battle flow.
+  E.modernWildArea = include("modern_owe_adapter.lua")(mod, E)
+
   function E.random32()
     if E.Rng and E.Rng.Random32 then return E.Rng.Random32() end
     return E.random() + E.random() * 65536
@@ -1080,15 +1124,29 @@ return function(mod)
 
   --- Expansion species id for an engine species (national dex, Unown letter
   --- forms at SPECIES_UNOWN_B + n - 1).  nil if it has no national number.
-  local SPECIES_UNOWN, SPECIES_UNOWN_B = 201, 1024
   function E.expansionSpecies(species, personality)
     local nat = Pokemon.national(species)
     if not nat then return nil end
-    if nat == SPECIES_UNOWN and personality then
-      local l = Pokemon.unownLetter(personality)
-      if l > 0 then nat = SPECIES_UNOWN_B + l - 1 end
+    -- National Dex #906 is Sprigatito, but expansion SPECIES_906 is
+    -- Mega Venusaur. Translate ONLY the visual atlas ID; battle/save
+    -- species are left in the engine's original numeric namespace.
+    -- National Dex alternate forms have their own engine slots but the
+    -- same National number; prefer its public slot -> form-id API.
+    local formId
+    if type(species) == "number" and species >= 1090
+        and type(mod.find) == "function" then
+      local ok, dex = pcall(mod.find, mod, "national_dex_gen3")
+      local exports = ok and dex and dex.exports
+      if type(exports) == "table" and type(exports.idOfSlot) == "function" then
+        local okId, id = pcall(exports.idOfSlot, species)
+        if okId and type(id) == "string" then formId = id end
+      end
     end
-    return nat
+    local letter
+    if nat == 201 and personality then
+      letter = Pokemon.unownLetter(personality)
+    end
+    return ExpansionSpeciesMap.resolve(nat, formId, letter)
   end
 
   -- src/wild_encounter.c:974 GetLocalWildMon (ChooseWildMonIndex_Land/Water
@@ -1396,6 +1454,7 @@ return function(mod)
   -- onStep(ev), onMapEntered(ev), onBattleStarted(ev), onBattleEnded(ev).
   local Data = include("data.lua")
   E.Data = Data
+  E.OWESpeciesHook = include("owe_species_hook.lua")
   local Follower = include("follower.lua")
   local Owe = include("owe.lua")
   E.Follower, E.Owe = Follower, Owe
@@ -1529,7 +1588,16 @@ return function(mod)
   end)
   mod.events:on("mod.options_changed", function(ev)
     if ev.mod ~= mod.id then return end
+    local oldLimit = C.OWE_ACTIVE_LIMIT
+    local oldProximity = C.OWE_SPAWN_PROXIMITY
+    local oldDelay = C.OWE_SPAWN_TIME_MINIMUM
     readOptions()
+    if oldLimit ~= C.OWE_ACTIVE_LIMIT then Owe.trimPopulation() end
+    if oldLimit ~= C.OWE_ACTIVE_LIMIT
+        or oldProximity ~= C.OWE_SPAWN_PROXIMITY
+        or oldDelay ~= C.OWE_SPAWN_TIME_MINIMUM then
+      Owe.setMinimumSpawnTimer()
+    end
     if not C.OW_FOLLOWERS_ENABLED then Follower.reset() end
     if not C.WE_OW_ENCOUNTERS then Owe.reset() end
   end)

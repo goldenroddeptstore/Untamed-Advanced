@@ -8,6 +8,19 @@ on:
   workflow_dispatch:
 
 jobs:
+  owe-randomizer-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Lua 5.1
+        run: sudo apt-get update && sudo apt-get install -y lua5.1
+      - name: Run overworld species hook compatibility smoke
+        run: lua5.1 tests/owe_species_hook_smoke.lua
+      - name: Run randomised encounter-chain display regression
+        run: lua5.1 tests/owe_chain_randomizer_smoke.lua
+      - name: Verify National Dex species artwork translation and form fallback
+        run: lua5.1 tests/owe_expansion_species_map_smoke.lua
+
   package:
     runs-on: ubuntu-latest
     outputs:

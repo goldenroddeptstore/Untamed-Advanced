@@ -14,3 +14,6 @@
 
 ## Engine
 - **[gen1recomp](https://github.com/bryanthaboi/gen1recomp)** by bryanthaboi and contributors: the LÖVE2D engine this mod runs on.
+
+## Mod compatibility
+- **[Deluxe0111](https://github.com/Deluxe0111)** — Nuzlocke v3.0.0-BETA compatibility integration: connects the Nuzlocke Random Wild species selection to Untamed Advanced's visible overworld encounters and maintains the correct sprite/battle species and randomised encounter-chain display.

@@ -42,7 +42,7 @@ local function ow_species(a) return a.active and a.species or nil end
 local function setMinimumOWESpawnTimer()
   if not C.WE_OW_ENCOUNTERS then return end
   sOWESpawnCountdown = C.OWE_SPAWN_TIME_MINIMUM
-  if E.lureSteps() > 0 and numActive("generated") < C.OWE_SPAWNS_MAX then
+  if E.lureSteps() > 0 and numActive("generated") < C.OWE_ACTIVE_LIMIT then
     sOWESpawnCountdown = C.OWE_SPAWN_TIME_LURE
   end
 end
@@ -50,9 +50,9 @@ Owe.setMinimumSpawnTimer = setMinimumOWESpawnTimer
 
 local function setNewOWESpawnCountdown()
   local n = numActive("generated")
-  if C.WE_OWE_SPAWN_REPLACEMENT and n >= C.OWE_SPAWNS_MAX then
+  if C.WE_OWE_SPAWN_REPLACEMENT and n >= C.OWE_ACTIVE_LIMIT then
     sOWESpawnCountdown = C.OWE_SPAWN_TIME_REPLACEMENT
-  elseif E.lureSteps() > 0 and n < C.OWE_SPAWNS_MAX then
+  elseif E.lureSteps() > 0 and n < C.OWE_ACTIVE_LIMIT then
     sOWESpawnCountdown = C.OWE_SPAWN_TIME_LURE
   else
     sOWESpawnCountdown = C.OWE_SPAWN_TIME_MINIMUM + C.OWE_SPAWN_TIME_PER_ACTIVE * n
@@ -86,7 +86,7 @@ local FX_INFO = {
   shiny      = { 0, 0,  { 4, 4, 4, 6, 6, 4, 4, 4 }, true }, -- SHINY_SPARKLE
 }
 -- Effect sprite pool; dropped when full, like pret.
-local FX_POOL = 8
+local FX_POOL = 12
 local fxPool = {}
 Owe.fx = fxPool
 
@@ -257,7 +257,7 @@ end
 
 local function shouldDespawnGeneratedForNewOWE(a)
   if not isOWE(a, "generated") then return false end
-  return C.WE_OWE_SPAWN_REPLACEMENT and numActive("generated") >= C.OWE_SPAWNS_MAX
+  return C.WE_OWE_SPAWN_REPLACEMENT and numActive("generated") >= C.OWE_ACTIVE_LIMIT
 end
 
 local function shouldPlayFleeSound(a)
@@ -276,6 +276,7 @@ end
 local function clearSlot(a)
   a.active, a.moving, a.oweType = false, false, nil
   a.species, a.engineSpecies, a.level, a.age, a.category = nil, nil, 0, 0, nil
+  a.authoredSpecies = nil
   a.noDespawn, a.offScreen = false, false
 end
 
@@ -328,7 +329,7 @@ local function getOldestActiveOWESlot(forceRemove)
   local oldest, first
   for s = 0, C.OWE_SPAWNS_MAX - 1 do
     local a = slotActor(s)
-    if ow_species(a) and (not hasNoDespawnFlag(a) or forceRemove) then
+    if isOWE(a, "generated") and a.species and (not hasNoDespawnFlag(a) or forceRemove) then
       oldest, first = a, s
       break
     end
@@ -336,7 +337,7 @@ local function getOldestActiveOWESlot(forceRemove)
   if not first then return nil end
   for s = first, C.OWE_SPAWNS_MAX - 1 do
     local a = slotActor(s)
-    if ow_species(a) and (not hasNoDespawnFlag(a) or forceRemove) and a.age > oldest.age then
+    if isOWE(a, "generated") and a.species and (not hasNoDespawnFlag(a) or forceRemove) and a.age > oldest.age then
       oldest = a
     end
   end
@@ -345,7 +346,7 @@ end
 
 -- GetNextOWESpawnSlot (nil = OWE_INVALID_SPAWN_SLOT)
 local function getNextOWESpawnSlot()
-  if numActive("generated") >= C.OWE_SPAWNS_MAX then
+  if numActive("generated") >= C.OWE_ACTIVE_LIMIT then
     if C.WE_OWE_SPAWN_REPLACEMENT then return getOldestActiveOWESlot(false) end
     return nil
   end
@@ -363,26 +364,59 @@ function Owe.removeOldestGenerated()
   return a
 end
 
--- Tile.  TrySelectTileForOWE -> x, y or nil
+-- Apply population setting changes without resizing the actor pool. Keep
+-- protected shiny encounters, roamers and authored/manual actors intact.
+function Owe.trimPopulation()
+  while numActive("generated") > C.OWE_ACTIVE_LIMIT do
+    local s = getOldestActiveOWESlot(false)
+    if s == nil then break end -- all remaining generated actors are protected
+    Owe.remove(slotActor(s))
+  end
+end
+
+-- Tile. Classic retains the original single random tile pick. The tuned
+-- modes use a bounded series of candidates, biased closer to the player.
+-- Rejecting an unsuitable tile no longer wastes an entire spawn cooldown.
 local function trySelectTileForOWE()
   local water = E.surfing()
   local cd = water and C.OWE_SPAWN_DISTANCE_WATER or C.OWE_SPAWN_DISTANCE_LAND
-  local x = E.random() % (C.OWE_SPAWN_WIDTH_TOTAL - 2 * cd) - (C.OWE_SPAWN_WIDTH_RADIUS - cd)
-  if x < 0 then x = x - cd else x = x + cd end
-  local y = E.random() % (C.OWE_SPAWN_HEIGHT_TOTAL - 2 * cd) - (C.OWE_SPAWN_HEIGHT_RADIUS - cd)
-  if y < 0 then y = y - cd else y = y + cd end
+  local proximity = C.OWE_SPAWN_PROXIMITY or 0
   local px, py = E.playerCur() -- PlayerGetDestCoords
-  x, y = x + px, y + py
+  local attempts = proximity == 0 and 1 or 8
 
-  if not E.insidePlayerMap(x, y) then return nil end
-  local elevation = E.elevationAt(x, y)
-  if elevation == 0 or elevation == 15 then return nil end
+  for attempt = 1, attempts do
+    local dx, dy
+    if proximity == 0 then
+      -- Original pokeemerald-expansion distribution.
+      dx = E.random() % (C.OWE_SPAWN_WIDTH_TOTAL - 2 * cd) - (C.OWE_SPAWN_WIDTH_RADIUS - cd)
+      if dx < 0 then dx = dx - cd else dx = dx + cd end
+      dy = E.random() % (C.OWE_SPAWN_HEIGHT_TOTAL - 2 * cd) - (C.OWE_SPAWN_HEIGHT_RADIUS - cd)
+      if dy < 0 then dy = dy - cd else dy = dy + cd end
+    else
+      -- Most picks are close enough to notice. The last two attempts also
+      -- cover the outer field, so narrow routes do not become spawn-starved.
+      local near = attempt <= 6 and (proximity == 2 or E.random() % 4 ~= 0)
+      local wr = near and (proximity == 2 and 3 or 5) or C.OWE_SPAWN_WIDTH_RADIUS
+      local hr = near and (proximity == 2 and 2 or 3) or C.OWE_SPAWN_HEIGHT_RADIUS
+      dx = E.random() % (2 * wr + 1) - wr
+      dy = E.random() % (2 * hr + 1) - hr
+    end
 
-  local kind = E.encounterKind(x, y)
-  local isEncounterTile = (water and kind == "water") or (not water and kind == "land")
-  if isEncounterTile and not E.collisionAt(x, y) then
-    -- GetObjectEventIdByPosition(x, y, 0) == OBJECT_EVENTS_COUNT
-    if not E.Objects.at(x, y) and not E.actorAt(x, y) then return x, y end
+    -- No spawning on the player, or immediately adjacent while surfing.
+    if math.max(math.abs(dx), math.abs(dy)) >= cd then
+      local x, y = px + dx, py + dy
+      if E.insidePlayerMap(x, y) then
+        local elevation = E.elevationAt(x, y)
+        if elevation ~= 0 and elevation ~= 15 then
+          local kind = E.encounterKind(x, y)
+          if ((water and kind == "water") or (not water and kind == "land"))
+              and not E.collisionAt(x, y)
+              and not E.Objects.at(x, y) and not E.actorAt(x, y) then
+            return x, y
+          end
+        end
+      end
+    end
   end
   return nil
 end
@@ -454,22 +488,32 @@ local function tryGenerateWildMon(slots, kind)
   local e = slots[idx] or slots[#slots]
   local sp = entrySpecies(e)
   if not sp then return nil end
-  return sp, chooseWildMonLevel(e)
+  -- Preserve the native slot index; Modern Spawns changes the species in
+  -- each entry but retains the slot order, weights and level range.
+  return sp, chooseWildMonLevel(e), idx
 end
 
 -- Encounter chain (pokeemerald-rogue, not expansion: PARITY R1-R4).
 -- RAM only like sFollowMonData.encounterChain*: never saved.
-local chainSpecies, chainCount = nil, 0
+-- Public chain species is the one actually fought; an internal source slot
+-- is kept only for Rogue's weighted repeat-spawn lookup.
+local chainSpecies, chainCount, chainSource = nil, 0, nil
 
 -- rogue_followmon.c UpdateWildEncounterChain (nil = SPECIES_NONE)
-local function updateWildEncounterChain(species)
+local function updateWildEncounterChain(species, source)
   if chainSpecies ~= species then
-    if chainCount >= 3 then E.popup(chainSpecies, nil) end -- PokemonChainBroke (>= so every shown chain reports its break)
-    chainSpecies, chainCount = species, 0
+    if chainCount >= 3 then E.popup(chainSpecies, nil) end -- PokemonChainBroke
+    chainSpecies, chainCount, chainSource = species, 0, nil
   end
   if species then
+    -- A randomized Feraligatr from a native Rattata slot must display
+    -- Feraligatr in the popup, while the source slot still controls which
+    -- authored encounter may receive Rogue's increased spawn odds.
+    chainSource = source or species
     if chainCount < 255 then chainCount = chainCount + 1 end
     if chainCount >= 3 then E.popup(species, chainCount) end -- PokemonChain
+  else
+    chainSource = nil
   end
 end
 
@@ -481,9 +525,9 @@ local CHAIN_FAIL = { lose = true, lost = true, blackout = true, whiteout = true,
   mon_fled = true, mon_teleported = true, player_teleported = true }
 
 -- Rogue_Battle_EndWildBattle (chain part)
-local function onChainBattleEnd(result, species)
+local function onChainBattleEnd(result, species, source)
   if not C.OWE_ROGUE_CHAIN then return end
-  if CHAIN_WON[result] then updateWildEncounterChain(species)
+  if CHAIN_WON[result] then updateWildEncounterChain(species, source)
   elseif CHAIN_CAUGHT[result] or (CHAIN_FAIL[result] and chainSpecies == species) then
     updateWildEncounterChain(nil)
   end
@@ -501,8 +545,9 @@ end
 -- IsChainSpeciesValidForSpawning -> matching slot (for its level range)
 local function chainSlot(slots)
   if not chainSpecies then return nil end
+  local authored = chainSource or chainSpecies
   for i = 1, #slots do
-    if entrySpecies(slots[i]) == chainSpecies then return slots[i] end
+    if entrySpecies(slots[i]) == authored then return slots[i] end
   end
   return nil
 end
@@ -517,10 +562,14 @@ local function forceChainSpeciesSpawn(slots)
   return nil
 end
 
-function Owe.chainState() return chainSpecies, chainCount end
+function Owe.chainState() return chainSpecies, chainCount, chainSource end
 Owe._chain = { update = updateWildEncounterChain, onBattleEnd = onChainBattleEnd,
   shinyOdds = getEncounterChainShinyOdds,
-  set = function(s, n) chainSpecies, chainCount = s, n end }
+  source = function() return chainSource end,
+  sourceSlot = chainSlot,
+  set = function(s, n, source)
+    chainSpecies, chainCount, chainSource = s, n, source or s
+  end }
 
 local function roamerOWEExists(index)
   for i = FIRST, LAST do
@@ -538,7 +587,7 @@ local function setSpeciesInfoForOWE(info, x, y)
   local slots = E.wildArea(header, kind)
   if not slots then return false end
 
-  local sp, level, chainE
+  local sp, level, chainE, sourceSpecies
   if info.category == CAT_UNDEFINED then
     -- TryStartRoamerEncounter: IsRoamerAt && Random() % 4 == 0
     for i = 0, ROAMER_COUNT - 1 do
@@ -560,15 +609,37 @@ local function setSpeciesInfoForOWE(info, x, y)
     else
       chainE = forceChainSpeciesSpawn(slots) -- Rogue_CreateWildMon (PARITY R2)
       if chainE then
+        -- The source identifies a native slot, NOT the species to display.
+        -- Reuse the actual chained species: Modern Spawns COMPLETE/RANDOM
+        -- may have drawn a different species for this slot, and Nuzlocke
+        -- may have randomised it again. Rerolling either breaks the chain.
+        sourceSpecies = entrySpecies(chainE)
         sp, level = chainSpecies, chooseWildMonLevel(chainE)
       else
-        sp, level = tryGenerateWildMon(slots, kind)
+        -- Ordinary visual encounters need a fresh Modern Spawns draw,
+        -- rather than reusing only the native Route 1 source species.
+        -- The adapter retains native slot order, weights and level ranges.
+        local drawn = E.modernWildArea and E.modernWildArea(kind, slots)
+        local index
+        sp, level, index = tryGenerateWildMon(drawn or slots, kind)
+        sourceSpecies = index and entrySpecies(slots[index]) or nil
       end
     end
   else
     sp, level = tryGenerateWildMon(slots, kind)
   end
   if not sp then return false end
+
+  -- Track the native source independently of the visible species, even
+  -- when only Modern Spawns changes it. The next chain-forced encounter
+  -- must find this source in the original wild table.
+  info.authoredSpecies = info.category == CAT_UNDEFINED and (sourceSpecies or sp) or nil
+  if info.category == CAT_UNDEFINED and E.OWESpeciesHook and not chainE then
+    -- Apply the optional randomiser to ordinary draws only. A forced
+    -- chain spawn already has its final, previously validated identity.
+    local chosen = E.OWESpeciesHook.apply(E, sp, level, kind, x, y)
+    if chosen and chosen ~= sp then sp = chosen end
+  end
 
   -- CreateWildMon: random personality (GetSynchronizedGender = Cute Charm)
   local personality = E.random32()
@@ -592,12 +663,26 @@ local function setSpeciesInfoForOWE(info, x, y)
     personality, info.shiny = E.makeShiny(personality), true
     info.species = E.expansionSpecies(sp, personality) or info.species
   end
+  -- Nuzlocke and other optional providers adjust the actual personality
+  -- here, not merely a temporary shiny display flag. This also preserves
+  -- native chain shinies and makes the OWE sprite match battle/capture.
+  if info.category == CAT_UNDEFINED and E.OWESpeciesHook then
+    local pid, isShiny = E.OWESpeciesHook.applyShiny(
+      E, sp, level, personality, info.shiny, kind, x, y)
+    if pid ~= personality then
+      personality, info.shiny = pid, isShiny
+      info.species = E.expansionSpecies(sp, personality) or info.species
+    end
+  end
   info.personality = personality
   info.female = E.femaleFor(sp, personality)
   if C.WE_OWE_PREVENT_SHINY_DESPAWN and info.shiny then info.noDespawn = true end
   if info.category == CAT_UNDEFINED then info.category = CAT_WILD end
   return true
 end
+
+-- Internal regression hook for verifying species/source/shiny continuity.
+Owe._chain.spawnInfo = setSpeciesInfoForOWE
 
 local function abilityAllowsEncounter(level)
   local lead = E.leadMon()
@@ -649,7 +734,8 @@ local function spawnOWE(a, x, y)
   a.asym = E.Data.ATLAS.asym[info.species] == 1
   a.species, a.engineSpecies, a.level = info.species, info.engineSpecies, info.level
   a.shiny, a.female, a.category, a.noDespawn = info.shiny, info.female, info.category, info.noDespawn
-  a.personality, a.moves = info.personality, info.moves
+  a.personality, a.moves, a.authoredSpecies =
+    info.personality, info.moves, info.authoredSpecies
   a.oweType, a.age, a.offScreen = "generated", 0, false
   a.cellX, a.cellY, a.targetX, a.targetY = x, y, x, y
   a.initX, a.initY = x, y
@@ -706,7 +792,7 @@ function Owe.tick()
   end
 
   info.category, info.noDespawn, info.moves = CAT_UNDEFINED, false, nil
-  info.species, info.engineSpecies = nil, nil
+  info.species, info.engineSpecies, info.authoredSpecies = nil, nil, nil
   local ok = setSpeciesInfoForOWE(info, x, y)
   if not ok
       or (C.WE_OWE_SPECIAL_ONLY and info.category >= CAT_WILD)
@@ -1421,9 +1507,13 @@ end
 
 local function startWildBattleWithOWE(a)
   local sp = a.engineSpecies
+  -- Battle.started clears the OWE actor. Snapshot both identities:
+  -- public chain display/battles use the visible species; repeat-spawn
+  -- lookup internally uses the authored source slot.
+  local authored = a.authoredSpecies or sp
   local done = function(result)
     battleDone = true
-    onChainBattleEnd(result, sp) -- Rogue_Battle_EndWildBattle (PARITY R1)
+    onChainBattleEnd(result, sp, authored)
   end
   local cat = a.category
   if cat and cat < ROAMER_COUNT then -- StartWildBattleWithOWE_CheckRoamer
