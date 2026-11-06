@@ -23,11 +23,15 @@ For each ordinary land/water OWE when Modern Spawns is active:
    `Pokemon.speciesFromName` when required.
 4. Keep every slot's original probability and min/max levels. If a candidate
    has no verified Untamed overworld atlas artwork, use the original entry.
-5. Pick a weighted slot/level using Untamed's existing code.
+5. Pick a weighted slot/level using Untamed's existing code and retain the
+   **original native species from that slot** separately.
 6. Apply Nuzlocke's optional `untamed.owe.species` hook *afterwards*.
    That hook remains the final randomisation authority for ordinary OWEs.
 7. Build the sprite, personality/shiny data and eventual battle foe from
-   the final accepted species.
+   the final accepted species. Wins chain that **visible species**, while
+   repeat-spawn lookup uses the original native slot. A chain-forced repeat
+   keeps the previously battled species and skips fresh Modern/Nuzlocke
+   species draws, allowing Untamed's native chain-shiny roll to run.
 
 If Modern Spawns is absent, disabled, lacks the API, or returns an invalid
 table, Untamed keeps its previous native behaviour.
